@@ -1,0 +1,40 @@
+# Transformation Configuration
+# Each transformation specifies:
+# - source_column: The column to transform
+# - function: The transformation function name from transformations.py
+# - output_columns: List of output column names (order matters!)
+# - description: Optional description of what the transformation does
+
+transformations:
+  - source_column: tag50_username
+    function: split_lastname_firstname
+    output_columns:
+      - LastName
+      - FirstName
+    description: "Split 'LASTNAME, FIRSTNAME [MIDDLE]' format. Drops middle initials, keeps full middle names."
+
+
+
+post_processing:
+  drop_duplicates:
+    subset:  # Optional: columns to consider for duplicate detection      
+      - FirstName
+      - LastName
+    keep: "first"  # Options: 'first', 'last', or false (remove all duplicates)
+
+  # Add a hash ID column based on row values
+  # Simple format: just specify column name (uses MD5 on all columns)
+  # add_hash_id: "row_id"
+
+  # Advanced format: specify column name, algorithm, and which columns to hash
+  add_hash_id:
+    - column_name: "id"
+      algorithm: "join"  # Options: md5, sha1, sha256
+      subset:  # Optional: only hash these columns (if not specified, uses all columns)
+        - FirstName
+        - LastName
+
+column_order:
+  - FirstName
+  - LastName
+  - id

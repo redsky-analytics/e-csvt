@@ -1,0 +1,16 @@
+[project]
+name = "csv-tool"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ipykernel>=7.0.0",
+    "jellyfish>=1.2.1",
+    "numpy>=2.3.3",
+    "pandas>=2.3.3",
+    "pyyaml>=6.0.3",
+    "rapidfuzz>=3.14.1",
+    "scikit-learn>=1.7.2",
+    "sentence-transformers>=5.1.1",
+]

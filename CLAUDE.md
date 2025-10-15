@@ -1,0 +1,1 @@
+- all outputs from transformations should be in lowercase

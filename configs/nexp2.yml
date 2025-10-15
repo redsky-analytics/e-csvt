@@ -1,0 +1,40 @@
+# Transformation Configuration
+# Each transformation specifies:
+# - source_column: The column to transform
+# - function: The transformation function name from transformations.py
+# - output_columns: List of output column names (order matters!)
+# - description: Optional description of what the transformation does
+
+transformations:
+  - source_column: tag50_username
+    function: split_lastname_firstname
+    output_columns:
+      - T50LastName
+      - T50FirstName
+    description: "Split 'LASTNAME, FIRSTNAME [MIDDLE]' format. Drops middle initials, keeps full middle names."
+
+  - source_column: fullname__c
+    function: split_firstname_lastname
+    output_columns:
+      - CRMFirstName
+      - CRMLastName
+    description: "Split 'FirstName LastName' format into separate columns"
+
+
+post_processing:
+
+  # Add multiple hash ID columns by providing a list
+  # Each item specifies column_name, algorithm, and subset of columns to hash
+  add_hash_id:
+    - column_name: "t50_id"
+      algorithm: "join"  # Options: md5, sha1, sha256
+      subset:  # Optional: only hash these columns (if not specified, uses all columns)
+        - T50FirstName
+        - T50LastName
+
+    - column_name: "crm_id"
+      algorithm: "join"  # Options: md5, sha1, sha256
+      subset:  # Optional: only hash these columns (if not specified, uses all columns)
+        - CRMFirstName
+        - CRMLastName
+    
