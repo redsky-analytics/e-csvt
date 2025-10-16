@@ -26,10 +26,11 @@ post_processing:
   # Simple format: just specify column name (uses MD5 on all columns)
   # add_hash_id: "row_id"
 
-  # Advanced format: specify column name, algorithm, and which columns to hash
+  # Advanced format: specify column name, algorithm, prefix, and which columns to hash
   add_hash_id:
     - column_name: "id"
-      algorithm: "join"  # Options: md5, sha1, sha256
+      algorithm: "join"  # Options: md5, sha1, sha256, join
+      prefix: ""  # Optional: prefix to prepend to hash values (e.g., "user_" -> "user_john-doe")
       subset:  # Optional: only hash these columns (if not specified, uses all columns)
         - FirstName
         - LastName

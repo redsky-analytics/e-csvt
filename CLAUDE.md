@@ -1,1 +1,2 @@
 - all outputs from transformations should be in lowercase
+- use uv run to run scripts and test

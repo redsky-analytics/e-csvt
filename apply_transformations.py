@@ -139,7 +139,8 @@ def apply_post_processing(df: pd.DataFrame, config: dict) -> pd.DataFrame:
             hash_configs.append({
                 "column_name": hash_config.get("column_name", "row_hash_id"),
                 "algorithm": hash_config.get("algorithm", "md5").lower(),
-                "subset": hash_config.get("subset", None)
+                "subset": hash_config.get("subset", None),
+                "prefix": hash_config.get("prefix", "")
             })
         elif isinstance(hash_config, list):
             # Multiple hash configurations
@@ -148,7 +149,8 @@ def apply_post_processing(df: pd.DataFrame, config: dict) -> pd.DataFrame:
                     hash_configs.append({
                         "column_name": cfg.get("column_name", f"hash_id_{len(hash_configs)}"),
                         "algorithm": cfg.get("algorithm", "md5").lower(),
-                        "subset": cfg.get("subset", None)
+                        "subset": cfg.get("subset", None),
+                        "prefix": cfg.get("prefix", "")
                     })
         else:
             # Fallback
@@ -163,8 +165,10 @@ def apply_post_processing(df: pd.DataFrame, config: dict) -> pd.DataFrame:
             column_name = hash_cfg["column_name"]
             algorithm = hash_cfg["algorithm"]
             subset = hash_cfg["subset"]
+            prefix = hash_cfg.get("prefix", "")
 
-            print(f"Adding hash ID column '{column_name}' using {algorithm.upper()}")
+            prefix_msg = f" with prefix '{prefix}'" if prefix else ""
+            print(f"Adding hash ID column '{column_name}' using {algorithm.upper()}{prefix_msg}")
 
             # Determine which columns to hash
             columns_to_hash = subset if subset else result_df.columns.tolist()
@@ -178,25 +182,30 @@ def apply_post_processing(df: pd.DataFrame, config: dict) -> pd.DataFrame:
                 print(f"  Warning: No valid columns to hash for '{column_name}', skipping")
                 continue
 
-            def compute_hash(row, cols, algo):
+            def compute_hash(row, cols, algo, pfx):
                 # Concatenate all values in the row (for specified columns)
                 row_string = "|".join(str(row[col]) if pd.notna(row[col]) else "" for col in cols)
 
                 # Compute hash or join
                 if algo == "join":
                     # Join values with "-" separator (no cryptographic hash)
-                    return "-".join(str(row[col]) if pd.notna(row[col]) else "" for col in cols)
+                    hash_value = "-".join(str(row[col]) if pd.notna(row[col]) else "" for col in cols)
                 elif algo == "md5":
-                    return hashlib.md5(row_string.encode("utf-8")).hexdigest()
+                    hash_value = hashlib.md5(row_string.encode("utf-8")).hexdigest()
                 elif algo == "sha256":
-                    return hashlib.sha256(row_string.encode("utf-8")).hexdigest()
+                    hash_value = hashlib.sha256(row_string.encode("utf-8")).hexdigest()
                 elif algo == "sha1":
-                    return hashlib.sha1(row_string.encode("utf-8")).hexdigest()
+                    hash_value = hashlib.sha1(row_string.encode("utf-8")).hexdigest()
                 else:
                     print(f"  Warning: Unknown hash algorithm '{algo}', using MD5")
-                    return hashlib.md5(row_string.encode("utf-8")).hexdigest()
+                    hash_value = hashlib.md5(row_string.encode("utf-8")).hexdigest()
 
-            result_df[column_name] = result_df.apply(lambda row: compute_hash(row, available_hash_cols, algorithm), axis=1)
+                # Prepend prefix if provided (lowercase per CLAUDE.md instructions)
+                if pfx:
+                    return f"{pfx.lower()}{hash_value.lower()}"
+                return hash_value.lower()
+
+            result_df[column_name] = result_df.apply(lambda row: compute_hash(row, available_hash_cols, algorithm, prefix), axis=1)
             print(f"  Created {len(result_df)} hash IDs based on {len(available_hash_cols)} columns")
 
     # Drop duplicates
