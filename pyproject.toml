@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "faiss-cpu>=1.7.4",
     "ipykernel>=7.0.0",
     "jellyfish>=1.2.1",
     "numpy>=2.3.3",
