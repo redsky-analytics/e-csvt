@@ -45,7 +45,10 @@ class HybridEntityResolver:
                  use_semantic: bool = True,
                  batch_size: int = 1000,
                  field_mapping: Dict[str, str] = None,
-                 field_weights: Dict[str, float] = None):
+                 field_weights: Dict[str, float] = None,
+                 use_embedding_blocking: bool = False,
+                 embedding_block_k: int = 50,
+                 embedding_similarity_threshold: float = 0.75):
         """
         Initialize the resolver
 
@@ -61,9 +64,15 @@ class HybridEntityResolver:
             field_weights: Dict with weights for each field
                           Default: {'email': 0.35, 'last_name': 0.20, 'first_name': 0.15,
                                    'company': 0.15, 'semantic_name': 0.15}
+            use_embedding_blocking: Whether to use embedding-based blocking (requires use_semantic=True)
+            embedding_block_k: Number of nearest neighbors to include in embedding blocks
+            embedding_similarity_threshold: Minimum cosine similarity for embedding blocking
         """
         self.use_semantic = use_semantic
         self.batch_size = batch_size
+        self.use_embedding_blocking = use_embedding_blocking and use_semantic
+        self.embedding_block_k = embedding_block_k
+        self.embedding_similarity_threshold = embedding_similarity_threshold
 
         # Set up field mapping (None means field is not used)
         if field_mapping is None:
@@ -104,8 +113,8 @@ class HybridEntityResolver:
         # Calculate normalized weights based on active fields
         self._normalize_weights()
 
-        # Precomputed embeddings cache
-        self.embeddings_cache = {}
+        # Precomputed embeddings cache (will store numpy arrays indexed by record index)
+        self.embeddings_cache = None  # Initialized during find_duplicates()
 
     def _normalize_weights(self):
         """Normalize weights based on active fields and redistribute if fields are missing"""
@@ -185,7 +194,7 @@ class HybridEntityResolver:
         else:
             df['email_domain'] = ''
 
-        print(f"✓ Preprocessed {len(df):,} records")
+        print(f"[OK] Preprocessed {len(df):,} records")
         print(f"  Active fields: {', '.join(self.active_fields.keys())}")
         return df
     
@@ -238,10 +247,75 @@ class HybridEntityResolver:
         }
 
         total_pairs = sum(len(v) * (len(v) - 1) // 2 for v in filtered_blocks.values())
-        print(f"✓ Created {len(filtered_blocks):,} blocks with ~{total_pairs:,} potential comparisons")
+        print(f"[OK] Created {len(filtered_blocks):,} blocks with ~{total_pairs:,} potential comparisons")
 
         return filtered_blocks
-    
+
+    def create_embedding_blocks(self, df: pd.DataFrame) -> Dict[str, List[int]]:
+        """
+        Create blocks using embedding-based nearest neighbor search
+
+        Args:
+            df: Preprocessed dataframe
+
+        Returns:
+            Dictionary of embedding-based blocks
+        """
+        if not self.use_embedding_blocking or self.embeddings_cache is None:
+            return {}
+
+        try:
+            import faiss
+        except ImportError:
+            print("Warning: FAISS not installed. Skipping embedding-based blocking.")
+            print("Install with: pip install faiss-cpu  (or faiss-gpu for GPU support)")
+            return {}
+
+        print("\nCreating embedding-based blocks...")
+
+        embeddings = self.embeddings_cache
+        n_records = len(embeddings)
+
+        # Build FAISS index
+        dimension = embeddings.shape[1]
+        index = faiss.IndexFlatIP(dimension)  # Inner Product (for normalized vectors = cosine similarity)
+
+        # Add embeddings to index
+        index.add(embeddings)
+
+        print(f"  Built FAISS index with {n_records:,} vectors ({dimension} dimensions)")
+
+        # Search for k nearest neighbors for each record
+        k = min(self.embedding_block_k + 1, n_records)  # +1 because self is always nearest
+        distances, indices = index.search(embeddings, k)
+
+        print(f"  Finding {self.embedding_block_k} nearest neighbors per record...")
+
+        # Create blocks based on nearest neighbors
+        blocks = defaultdict(list)
+        pairs_added = 0
+
+        for record_idx in tqdm(range(n_records), desc="Building embedding blocks", unit="records"):
+            # Get k nearest neighbors (excluding self at index 0)
+            neighbor_indices = indices[record_idx][1:]  # Skip first (self)
+            neighbor_distances = distances[record_idx][1:]
+
+            # Only include neighbors above similarity threshold
+            for neighbor_idx, distance in zip(neighbor_indices, neighbor_distances):
+                if distance >= self.embedding_similarity_threshold:
+                    # Create a unique block key for this pair
+                    # Use sorted indices to avoid duplicate blocks for (A,B) and (B,A)
+                    block_key = f"emb_nn:{min(record_idx, neighbor_idx)}_{max(record_idx, neighbor_idx)}"
+
+                    # Add both records to this block
+                    if block_key not in blocks:
+                        blocks[block_key] = [record_idx, int(neighbor_idx)]
+                        pairs_added += 1
+
+        print(f"[OK] Created {len(blocks):,} embedding-based blocks ({pairs_added:,} potential comparisons)")
+
+        return blocks
+
     @staticmethod
     def _soundex(name: str) -> str:
         """Generate Soundex code for phonetic matching"""
@@ -272,7 +346,46 @@ class HybridEntityResolver:
                 break
         
         return (soundex + '000')[:4]
-    
+
+    def _precompute_embeddings(self, df: pd.DataFrame) -> np.ndarray:
+        """
+        Pre-compute embeddings for all records
+
+        Args:
+            df: Preprocessed dataframe with 'full_name' column
+
+        Returns:
+            numpy array of embeddings (shape: [n_records, embedding_dim])
+        """
+        if not self.use_semantic:
+            return None
+
+        if 'first_name' not in self.active_fields and 'last_name' not in self.active_fields:
+            return None
+
+        print("\nPre-computing embeddings for all records...")
+
+        # Get full names
+        full_names = df['full_name'].tolist()
+
+        # Compute embeddings in batches
+        embeddings = self.model.encode(
+            full_names,
+            batch_size=self.batch_size,
+            show_progress_bar=True,
+            convert_to_numpy=True,
+            normalize_embeddings=True  # Pre-normalize for cosine similarity
+        )
+
+        # Convert to float32 for memory efficiency
+        embeddings = embeddings.astype(np.float32)
+
+        memory_mb = embeddings.nbytes / (1024 * 1024)
+        print(f"[OK] Pre-computed {len(embeddings):,} embeddings ({embeddings.shape[1]} dimensions)")
+        print(f"  Memory usage: {memory_mb:.1f} MB")
+
+        return embeddings
+
     def _compute_fuzzy_scores(self, r1: pd.Series, r2: pd.Series) -> Dict[str, float]:
         """Compute fuzzy matching scores between two records"""
         scores = {}
@@ -312,23 +425,28 @@ class HybridEntityResolver:
 
         return scores
     
-    def _compute_semantic_score(self, name1: str, name2: str) -> float:
-        """Compute semantic similarity between two names"""
-        if not self.use_semantic or not name1 or not name2:
+    def _compute_semantic_score(self, idx1: int, idx2: int) -> float:
+        """
+        Compute semantic similarity between two records using pre-computed embeddings
+
+        Args:
+            idx1: Index of first record
+            idx2: Index of second record
+
+        Returns:
+            Cosine similarity score (0-1)
+        """
+        if not self.use_semantic or self.embeddings_cache is None:
             return 0.0
-        
-        # Check cache
-        cache_key = tuple(sorted([name1, name2]))
-        if cache_key in self.embeddings_cache:
-            return self.embeddings_cache[cache_key]
-        
-        # Compute embeddings
-        embeddings = self.model.encode([name1, name2])
-        similarity = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
-        
-        # Cache result
-        self.embeddings_cache[cache_key] = float(similarity)
-        
+
+        # Look up pre-computed embeddings
+        emb1 = self.embeddings_cache[idx1]
+        emb2 = self.embeddings_cache[idx2]
+
+        # Compute cosine similarity (embeddings are already normalized)
+        # For normalized vectors, cosine similarity = dot product
+        similarity = np.dot(emb1, emb2)
+
         return float(similarity)
     
     def _batch_compute_semantic_scores(self, name_pairs: List[Tuple[str, str]]) -> List[float]:
@@ -365,8 +483,9 @@ class HybridEntityResolver:
         fuzzy_scores = self._compute_fuzzy_scores(r1, r2)
 
         # Compute semantic score for names (only if name fields are active)
+        # Now uses pre-computed embeddings indexed by record index
         if self.use_semantic and ('first_name' in self.active_fields or 'last_name' in self.active_fields):
-            semantic_score = self._compute_semantic_score(r1['full_name'], r2['full_name'])
+            semantic_score = self._compute_semantic_score(idx1, idx2)
         else:
             semantic_score = 0.0
 
@@ -417,7 +536,7 @@ class HybridEntityResolver:
         """
         print(f"Loading CSV from: {csv_path}")
         df = pd.read_csv(csv_path)
-        print(f"✓ Loaded {len(df):,} records")
+        print(f"[OK] Loaded {len(df):,} records")
 
         # Validate that all non-None mapped columns exist
         missing_cols = []
@@ -459,12 +578,25 @@ class HybridEntityResolver:
         print(f"Records: {len(df):,}")
         print(f"Threshold: {threshold}")
         print(f"Semantic matching: {'Enabled' if self.use_semantic else 'Disabled'}")
+        if self.use_embedding_blocking:
+            print(f"Embedding blocking: Enabled (k={self.embedding_block_k}, threshold={self.embedding_similarity_threshold})")
         
         # Preprocess
         df_clean = self.preprocess_data(df)
-        
-        # Create blocks
+
+        # Pre-compute embeddings for all records (if semantic matching is enabled)
+        self.embeddings_cache = self._precompute_embeddings(df_clean)
+
+        # Create string-based blocks
         blocks = self.create_blocks(df_clean)
+
+        # Create embedding-based blocks if enabled
+        if self.use_embedding_blocking:
+            embedding_blocks = self.create_embedding_blocks(df_clean)
+            # Merge embedding blocks with string-based blocks
+            blocks.update(embedding_blocks)
+            total_blocks = len(blocks)
+            print(f"[OK] Total blocks after merging: {total_blocks:,}")
         
         # Calculate total potential comparisons for progress bar
         total_potential_comparisons = sum(len(v) * (len(v) - 1) // 2 for v in blocks.values())
@@ -499,7 +631,7 @@ class HybridEntityResolver:
                     # Apply max_comparisons limit if set (for testing)
                     if max_comparisons and comparison_count >= max_comparisons:
                         pbar.close()
-                        print(f"\n✓ Reached max comparisons limit: {max_comparisons:,}")
+                        print(f"\n[OK] Reached max comparisons limit: {max_comparisons:,}")
                         break
                     
                     # Compare records
@@ -615,7 +747,7 @@ class HybridEntityResolver:
             for record_id in cluster:
                 cluster_map[record_id] = cluster_id
         
-        print(f"✓ Clustered {len(cluster_map):,} records into {len(clusters):,} groups")
+        print(f"[OK] Clustered {len(cluster_map):,} records into {len(clusters):,} groups")
         
         # Build result with original IDs if available
         result_data = []
