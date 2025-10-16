@@ -14,7 +14,13 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from tqdm.auto import tqdm
 import warnings
+import os
+import platform
 warnings.filterwarnings('ignore')
+
+# Fix for multiprocessing issues with sentence-transformers on all platforms
+# Prevents semaphore leaks and crashes on Windows/macOS
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 
 @dataclass
