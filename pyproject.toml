@@ -47,7 +47,7 @@ Issues = "https://github.com/redsky-analytics/e-csvt/issues"
 
 [project.scripts]
 ecsvt-transform = "ecsvt.apply_transformations:main"
-ecsvt-similarity = "ecsvt.cli.semantic_similarity_repl:run_repl"
+ecsvt-similarity = "ecsvt.cli.semantic_similarity_repl:main"
 
 [tool.uv]
 package = true

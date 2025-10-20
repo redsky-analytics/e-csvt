@@ -5,9 +5,11 @@ Uses the same method as the entity resolution system (ers.py)
 
 Usage:
     python semantic_similarity_repl.py
+    python semantic_similarity_repl.py --model all-MiniLM-L6-v2
 
     Or with uv:
     uv run python semantic_similarity_repl.py
+    uv run ecsvt-similarity --model paraphrase-MiniLM-L6-v2
 
 Example:
     Enter string 1: Bill Smith
@@ -17,6 +19,7 @@ Example:
     Interpretation: High similarity (>0.75)
 """
 
+import argparse
 import os
 import sys
 import numpy as np
@@ -96,20 +99,25 @@ class SemanticSimilarityCalculator:
             return "Very low similarity (<0.40) - unlikely match"
 
 
-def run_repl():
-    """Run the interactive REPL for semantic similarity comparison."""
+def run_repl(model_name: str = 'all-MiniLM-L6-v2'):
+    """
+    Run the interactive REPL for semantic similarity comparison.
+
+    Args:
+        model_name: Name of the sentence transformer model to use
+    """
     print("=" * 70)
     print("SEMANTIC SIMILARITY REPL")
     print("=" * 70)
     print("Compare two text strings using semantic embeddings")
-    print("Uses: all-MiniLM-L6-v2 model (same as entity resolution)")
+    print(f"Model: {model_name}")
     print()
     print("Commands: 'quit', 'exit', 'q', or Ctrl+C to exit")
     print("=" * 70)
     print()
 
     # Initialize calculator (loads model)
-    calc = SemanticSimilarityCalculator()
+    calc = SemanticSimilarityCalculator(model_name=model_name)
 
     try:
         while True:
@@ -154,5 +162,34 @@ def run_repl():
         sys.exit(1)
 
 
+def main():
+    """Main entry point with argument parsing."""
+    parser = argparse.ArgumentParser(
+        description="Interactive REPL for computing semantic similarity between text strings",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  ecsvt-similarity
+  ecsvt-similarity --model paraphrase-MiniLM-L6-v2
+  ecsvt-similarity --model all-mpnet-base-v2
+
+Popular Models:
+  all-MiniLM-L6-v2           Fast, lightweight (default, used by entity resolution)
+  paraphrase-MiniLM-L6-v2    Good for paraphrase detection
+  all-mpnet-base-v2          Higher quality, slower
+  paraphrase-mpnet-base-v2   Best quality for paraphrases
+        """
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="all-MiniLM-L6-v2",
+        help="Sentence transformer model name (default: all-MiniLM-L6-v2)"
+    )
+
+    args = parser.parse_args()
+    run_repl(model_name=args.model)
+
+
 if __name__ == "__main__":
-    run_repl()
+    main()
