@@ -21,7 +21,7 @@ import pandas as pd
 import yaml
 from pathlib import Path
 import hashlib
-import transformations
+from ecsvt import transformations
 
 
 def load_config(config_path: str) -> dict:

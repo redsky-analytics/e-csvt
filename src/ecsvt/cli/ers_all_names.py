@@ -3,7 +3,7 @@ Entity Resolution for all_names.csv
 Uses only FirstName and LastName fields with equal weights
 """
 
-from ers import HybridEntityResolver
+from ecsvt import HybridEntityResolver
 import pandas as pd
 
 

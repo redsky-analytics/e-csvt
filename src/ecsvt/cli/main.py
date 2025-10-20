@@ -1,9 +1,9 @@
 #%%
-import ers
+from ecsvt import HybridEntityResolver
 
 #%%
 def main():
-    resolver = ers.HybridEntityResolver()
+    resolver = HybridEntityResolver()
     result = resolver.find_duplicates(
         'sample_data.csv',
         threshold=0.75
